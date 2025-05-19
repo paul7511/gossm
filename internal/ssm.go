@@ -215,18 +215,15 @@ func FindInstances(ctx context.Context, cfg aws.Config) (map[string]*Target, err
 			for _, rv := range output.Reservations {
 				for _, inst := range rv.Instances {
 					name := ""
-					prometheus := ""
 					asgname := ""
 					for _, tag := range inst.Tags {
 						if aws.ToString(tag.Key) == "Name" {
 							name = aws.ToString(tag.Value)
-						} else if *tag.Key == "prometheus" {
-							prometheus = *tag.Value
 						} else if *tag.Key == "aws:autoscaling:groupName" {
 							asgname = *tag.Value
 						}
 					}
-					table[fmt.Sprintf("%-25s|%-35s|%-20s|%-18s|%-20s", name, asgname, *inst.InstanceId, *inst.PrivateIpAddress, prometheus)] = &Target{
+					table[fmt.Sprintf("%-25s|%-35s|%-18s|%-30s", name, asgname, *inst.PrivateIpAddress, *inst.LaunchTime)] = &Target{
 						Name:          aws.ToString(inst.InstanceId),
 						PublicDomain:  aws.ToString(inst.PublicDnsName),
 						PrivateDomain: aws.ToString(inst.PrivateDnsName),
