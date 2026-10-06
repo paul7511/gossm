@@ -31,7 +31,7 @@ var (
 	_version                 string
 	_credential              *Credential
 	_credentialWithMFA       = fmt.Sprintf("%s_mfa", config.DefaultSharedCredentialsFilename())
-	_credentialWithTemporary = fmt.Sprintf("%s_temporary", config.DefaultSharedCredentialsFilename())
+	_credentialWithTemporary string
 )
 
 type Credential struct {
@@ -45,15 +45,25 @@ type Credential struct {
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute(version string) {
 	rootCmd.Version = version
-	if err := rootCmd.Execute(); err != nil {
+	err := rootCmd.Execute()
+	cleanupTemporaryCredential()
+	if err != nil {
 		panicRed(err)
 	}
 }
 
 // panicRed raises error with text.
 func panicRed(err error) {
+	cleanupTemporaryCredential()
 	fmt.Println(color.RedString("[err] %s", err.Error()))
 	os.Exit(1)
+}
+
+// cleanupTemporaryCredential removes temporary credential file written for session-manager-plugin.
+func cleanupTemporaryCredential() {
+	if _credentialWithTemporary != "" {
+		os.Remove(_credentialWithTemporary)
+	}
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -214,16 +224,19 @@ func initConfig() {
 
 				temporaryCredentials, err = temporaryConfig.Credentials.Retrieve(context.Background())
 				if err != nil {
+					if internal.IsSSOProfile(context.Background(), _credential.awsProfile) {
+						color.Yellow("[SSO] %s", internal.SSOErrorHint(err, _credential.awsProfile))
+					}
 					panicRed(internal.WrapError(err))
 				}
 				if temporaryCredentials.Expired() || temporaryCredentials.AccessKeyID == "" || temporaryCredentials.SecretAccessKey == "" {
 					panicRed(internal.WrapError(fmt.Errorf("[err] not found credentials")))
 				}
+			}
 
-				// extract aws region if awsRegion is empty.
-				if awsRegion == "" {
-					awsRegion = temporaryConfig.Region
-				}
+			// extract aws region if awsRegion is empty.
+			if awsRegion == "" {
+				awsRegion = temporaryConfig.Region
 			}
 		}
 
@@ -232,7 +245,15 @@ func initConfig() {
 
 		temporaryCredentialsString := fmt.Sprintf(mfaCredentialFormat, _credential.awsProfile, temporaryCredentials.AccessKeyID,
 			temporaryCredentials.SecretAccessKey, temporaryCredentials.SessionToken)
-		if err := ioutil.WriteFile(_credentialWithTemporary, []byte(temporaryCredentialsString), 0600); err != nil {
+		// per-process file under ~/.gossm, removed on exit.
+		tmpFile, err := os.CreateTemp(_credential.gossmHomePath, "credentials_temporary_*")
+		if err != nil {
+			panicRed(internal.WrapError(err))
+		}
+		_credentialWithTemporary = tmpFile.Name()
+		_, err = tmpFile.WriteString(temporaryCredentialsString)
+		tmpFile.Close()
+		if err != nil {
 			panicRed(internal.WrapError(err))
 		}
 

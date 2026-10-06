@@ -8,7 +8,7 @@ jobs:
         - master
 
     docker:
-      - image: golang:1.17
+      - image: golang:1.27
 
     environment:
       GOPATH: /go
